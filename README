@@ -1,0 +1,63 @@
+The availablility of Dell Technologies PowerScale for Google Cloud Platform (GCP) opens up use cases for high-performance scalable file system in GCP. This process here shows how
+Dell Technologies PowerScale CSI Driver can work with a GCP VM Instance that has the ability to mount the NFS export from the PowerScale cluster that is configured inside GCP:
+
+1. Create a VM from existing instance template:
+(You can create it anyway you like, make sure there's decent CPU/Memory and pick CentOS family image)
+
+gcloud beta compute --project=my-isilon-project instances create k8s-1 --zone=us-east4-c --machine-type=n1-standard-2 --subnet=my-10-subnet --network-tier=PREMIUM --maintenance-policy=MIGRATE --service-account=382403961387-compute@developer.gserviceaccount.com --scopes=https://www.googleapis.com/auth/devstorage.read_only,https://www.googleapis.com/auth/logging.write,https://www.googleapis.com/auth/monitoring.write,https://www.googleapis.com/auth/servicecontrol,https://www.googleapis.com/auth/service.management.readonly,https://www.googleapis.com/auth/trace.append --image=centos-7-v20200811 --image-project=centos-cloud --boot-disk-size=20GB --boot-disk-type=pd-standard --boot-disk-device-name=k8s-1 --no-shielded-secure-boot --shielded-vtpm --shielded-integrity-monitoring --reservation-affinity=any
+
+2. Login to the VM Instance (Note: you may need a firewall rule for tcp:22 to login to the VM instance from the cloudshell) and run following:
+sudo bash
+yum install git
+git clone https://github.com/acd13/IsilonCSIDriver_Env_Installation-1.2.git
+cd isilon-csi-script
+sh docker_install.sh
+
+2. Now, install Kubernetes v1.16 using the below script
+sh install_k8s_1.16.sh
+
+3. At the end of above step you should get below output:
+# kubectl get pods -A -o wide
+NAMESPACE     NAME                                 READY   STATUS    RESTARTS   AGE    IP            NODE         NOMINATED NODE   READINESS GATES
+kube-system   coredns-5644d7b6d9-77wn7             1/1     Running   0          103s   10.32.0.2     k8s-master   <none>           <none>
+kube-system   coredns-5644d7b6d9-fqgmd             1/1     Running   0          103s   10.32.0.3     k8s-master   <none>           <none>
+kube-system   etcd-k8s-master                      1/1     Running   0          59s    192.168.0.4   k8s-master   <none>           <none>
+kube-system   kube-apiserver-k8s-master            1/1     Running   0          42s    192.168.0.4   k8s-master   <none>           <none>
+kube-system   kube-controller-manager-k8s-master   1/1     Running   0          43s    192.168.0.4   k8s-master   <none>           <none>
+kube-system   kube-proxy-vtv5c                     1/1     Running   0          103s   192.168.0.4   k8s-master   <none>           <none>
+kube-system   kube-scheduler-k8s-master            1/1     Running   0          39s    192.168.0.4   k8s-master   <none>           <none>
+kube-system   weave-net-gbg59                      2/2     Running   0          102s   192.168.0.4   k8s-master   <none>           <none>
+
+[root@k8s-master IsilonCSIDriver_Env_Installation-1.2]# kubectl get nodes -o wide
+NAME         STATUS   ROLES    AGE     VERSION    INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                KERNEL-VERSION                CONTAINER-RUNTIME
+k8s-master   Ready    master   2m14s   v1.16.12   192.168.0.4   <none>        CentOS Linux 7 (Core)   3.10.0-1127.18.2.el7.x86_64   docker://19.3.12
+
+4. Now install the CSI driver using the below script:
+sh install_Isilon_CSI_Driver_1.2.sh
+
+NOTES: 
+-Feature gates verification will fail due to CSINodeInfo=true taken out from k8s manifest files. Ignore that.
+-Helm init has to be provided with /usr/local/bin/helm, path /usr/local/bin was not in path on the VM instance by default
+-Make sure in myvalues.yaml file the NfsV3 is set to True otherwise V4 will be attempted by VM instance client.
+
+
+Run the test as usual (./starttest.sh -t 2vols -n test)
+
+[root@k8s-master IsilonCSIDriver_Env_Installation-1.2]# kubectl get pods -A
+NAMESPACE     NAME                                 READY   STATUS    RESTARTS   AGE
+isilon        isilon-controller-0                  5/5     Running   0          28m
+isilon        isilon-node-qnbl5                    2/2     Running   0          28m
+kube-system   coredns-5644d7b6d9-77wn7             1/1     Running   2          136m
+kube-system   coredns-5644d7b6d9-fqgmd             1/1     Running   2          136m
+kube-system   etcd-k8s-master                      1/1     Running   2          135m
+kube-system   kube-apiserver-k8s-master            1/1     Running   3          76m
+kube-system   kube-controller-manager-k8s-master   1/1     Running   2          84m
+kube-system   kube-proxy-vtv5c                     1/1     Running   2          136m
+kube-system   kube-scheduler-k8s-master            1/1     Running   2          84m
+kube-system   tiller-deploy-8488d98b4c-cf6d2       1/1     Running   0          34m
+kube-system   weave-net-gbg59                      2/2     Running   4          136m
+test          isilontest-0                         1/1     Running   0          84s
+
+[root@k8s-master IsilonCSIDriver_Env_Installation-1.2]# kubectl get nodes -o wide
+NAME         STATUS   ROLES    AGE    VERSION    INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                KERNEL-VERSION                CONTAINER-RUNTIME
+k8s-master   Ready    master   136m   v1.16.12   192.168.0.4   <none>        CentOS Linux 7 (Core)   3.10.0-1127.18.2.el7.x86_64   docker://19.3.12
